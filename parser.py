@@ -32,7 +32,7 @@ def get_articles_links():
     return article_links
 
 
-def get_articles_headers():
+def parser():
     headers = []
     authors = []
     dates = []
@@ -41,16 +41,32 @@ def get_articles_headers():
         http = urllib3.PoolManager()
         response = http.request('GET', url)
         soup = BeautifulSoup(response.data, features="lxml")
+
+        # Получаем заголовок статьи
         for header in soup.findAll('h1'):
             headers.append(header.get_text())
-        for author in soup.findAll("a", "url"):
+
+        # Находим тег div содержащий мета данные статьи
+        meta_details_div = soup.findAll("div", "entry-meta-details")
+
+        # Получаем имя автора статьи
+        for li in meta_details_div:
+            author = li.find("a", "url")
             authors.append(author.get_text())
-        for date in soup.findAll("li", "meta-date"):
+
+        # Получаем дату создания статьи
+        for li in meta_details_div:
+            date = li.find("li", "meta-date")
             dates.append(date.get_text())
-        divs = soup.findAll("div", "entry-meta-details")
-        for li in divs:
+
+        # Получаем кол-во просмотров статьи
+        for li in meta_details_div:
             view = li.find("li", "meta-views")
             views.append(view.get_text())
+
+    # Открываем JSON файл на чтение, затем на запись. Проходим циклом
+    # по занчениям главного словаря JSON файла и добавляем из полученных
+    # ранее списков новые данные.
     with open('articles.json', 'r') as ff:
         articles = json.load(ff)
     with open('articles.json', 'w') as f:
@@ -64,5 +80,4 @@ def get_articles_headers():
         json.dump(articles, f, indent=4, ensure_ascii=False)
 
 
-
-get_articles_headers()
+parser()
