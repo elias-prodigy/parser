@@ -1,83 +1,104 @@
 import json
 import urllib3
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
 
 
-def get_articles_links():
-    browser = webdriver.Chrome('/home/elias/PycharmProjects/parser/chromedriver')
-    browser.get('https://ux.pub/page/56/')
-    article_links = []
-    to_json = {}
-    article_num = 0
-    while browser:
-        try:
-            WebDriverWait(browser, timeout=3)
-            article_elems = browser.find_elements(By.CLASS_NAME, "post-outer")
-            for elem in article_elems:
-                exact_articles = elem.find_elements(By.CLASS_NAME, "post-link")
-                for a in exact_articles:
-                    article_num += 1
-                    article_links.append(a.get_attribute("href"))
-                    to_json.update({("Article#"+str(article_num)): {"URL": a.get_attribute("href")}})
-            browser.find_element_by_link_text("Далее").click()
-        except NoSuchElementException:
-            break
-    with open('articles.json', 'w') as f:
-        json.dump(to_json, f, indent=2)
-    browser.quit()
-    return article_links
+def page_links():
+
+    # Создаю список страниц содержащих ссылки на статьи
+    base_url = 'https://ux.pub/page/'
+    list_of_pages = ['https://ux.pub/']
+    page_num = 2
+    while page_num != 57:
+        list_of_pages.append(base_url + str(page_num))
+        page_num += 1
+    return list_of_pages
 
 
 def parser():
-    headers = []
-    authors = []
-    dates = []
-    views = []
-    for url in get_articles_links():
+    global date, header, author, view, tags
+    to_json = {}
+    article_num = 1
+    for url in page_links():
+
+        # Создаем сессию для страницы с перечнем статей
         http = urllib3.PoolManager()
         response = http.request('GET', url)
         soup = BeautifulSoup(response.data, features="lxml")
 
-        # Получаем заголовок статьи
-        for header in soup.findAll('h1'):
-            headers.append(header.get_text())
+        # Находим тег div содержащий ссылки на статьи
+        article_divs = soup.findAll("div", "post-outer")
+        for a in article_divs:
+            article = a.find("a", "post-link")
+            current_article = article.get("href")
 
-        # Находим тег div содержащий мета данные статьи
-        meta_details_div = soup.findAll("div", "entry-meta-details")
+            # Создаем сессию для каждой страницы со статьёй
+            http = urllib3.PoolManager()
+            response = http.request('GET', current_article)
+            soup = BeautifulSoup(response.data, features="lxml")
 
-        # Получаем имя автора статьи
-        for li in meta_details_div:
-            author = li.find("a", "url")
-            authors.append(author.get_text())
+            # Получаем заголовок статьи
+            for h1 in soup.findAll('h1'):
+                header = h1.get_text()
 
-        # Получаем дату создания статьи
-        for li in meta_details_div:
-            date = li.find("li", "meta-date")
-            dates.append(date.get_text())
+            # Находим тег div содержащий мета данные статьи
+            meta_details_div = soup.findAll("div", "entry-meta-details")
 
-        # Получаем кол-во просмотров статьи
-        for li in meta_details_div:
-            view = li.find("li", "meta-views")
-            views.append(view.get_text())
+            # Получаем имя автора статьи
+            for li in meta_details_div:
+                a = li.find("a", "url")
+                author = a.get_text()
 
-    # Открываем JSON файл на чтение, затем на запись. Проходим циклом
-    # по занчениям главного словаря JSON файла и добавляем из полученных
-    # ранее списков новые данные.
-    with open('articles.json', 'r') as ff:
-        articles = json.load(ff)
+            # Получаем дату создания статьи
+            for li in meta_details_div:
+                d = li.find("li", "meta-date")
+                date = d.get_text()
+
+            # Получаем кол-во просмотров статьи
+            for li in meta_details_div:
+                v = li.find("li", "meta-views")
+                view = v.get_text()
+
+            # Получаем SEO информацию
+            title = soup.head.title.text
+            m = soup.find("meta", attrs={'name': 'description'})
+            meta = m.get("content")
+
+            # Получаем теги статьи
+            tags_section = soup.find("section", attrs={'class': 'post-section post-tags'})
+            tags = []
+            if tags_section:
+                for t in tags_section.findAll("a"):
+                    tags.append(t.get_text())
+            else:
+                tags = ""
+
+            # Получаем данные из дополнительных полей
+            optional_fields = soup.find("div", "send-mistake")
+            if optional_fields.a.has_attr("href"):
+                source_name = optional_fields.a.get_text()
+                source_link = optional_fields.a.get("href")
+            else:
+                source_name = ""
+                source_link = ""
+
+            # Задаем структуру JSON документа
+            to_json.update({("article#" + str(article_num)):
+                                {"url": current_article,
+                                 "header": header,
+                                 "author": author,
+                                 "creation date": date,
+                                 "views": view,
+                                 "head_title": title,
+                                 "head_meta": meta,
+                                 "tags": tags,
+                                 "source_name": source_name,
+                                 "source_link": source_link}
+                            }
+                           )
+            article_num += 1
     with open('articles.json', 'w') as f:
-        v = 0
-        for value in articles.values():
-            value.update({"Header": headers[v]})
-            value.update({"Author": authors[v]})
-            value.update({"Creation date": dates[v]})
-            value.update({"Views": views[v]})
-            v += 1
-        json.dump(articles, f, indent=4, ensure_ascii=False)
+        json.dump(to_json, f, indent=4, ensure_ascii=False)
 
 
 parser()
